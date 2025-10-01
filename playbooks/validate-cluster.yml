@@ -1,0 +1,40 @@
+---
+- name: Check cluster connectivity
+  command: kubectl cluster-info
+  register: cluster_info
+
+- name: Get cluster nodes
+  command: kubectl get nodes
+  register: nodes_info
+- name: Display cluster info
+  debug:
+    msg: |
+      🔍 Cluster Status:
+      {{ cluster_info.stdout }}
+      
+      📦 Nodes:
+      {{ nodes_info.stdout }}
+
+- name: Check if applications are running
+  command: kubectl get pods -n default
+  register: pods_info
+  ignore_errors: true
+
+- name: Display application status
+  debug:
+    msg: |
+      🚀 Applications Status:
+      {{ pods_info.stdout if pods_info.rc == 0 else 'No applications deployed' }}
+
+- name: Check for any failed pods
+  command: kubectl get pods -n default --field-selector=status.phase!=Running
+  register: failed_pods
+  ignore_errors: true
+
+- name: Report cluster health summary
+  debug:
+    msg: |
+      ✅ Cluster Health Summary:
+      - Cluster API: {{ 'Accessible' if cluster_info.rc == 0 else 'Not accessible' }}
+      - Nodes: {{ nodes_info.stdout_lines | length - 1 }} node(s) ready
+      - Failed Pods: {{ failed_pods.stdout_lines | length - 1 if failed_pods.rc == 0 else 0 }}

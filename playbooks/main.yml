@@ -1,0 +1,30 @@
+---
+- name: Kubespray-Ansi Application Management
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  vars:
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
+    kubeconfig: "~/.kube/config"
+  
+  tasks:
+    - name: Display action
+      debug:
+        msg: "Action: {{ action | default('validate') }}"
+
+    - name: Deploy applications
+      include_tasks: deploy-apps.yml
+      when: action is defined and action == "deploy"
+
+    - name: Remove applications
+      include_tasks: remove-apps.yml
+      when: action is defined and action == "remove"
+
+    - name: Validate cluster
+      include_tasks: validate-cluster.yml
+      when: action is defined and action == "validate"
+
+    - name: Default to validate if no action
+      include_tasks: validate-cluster.yml
+      when: action is not defined

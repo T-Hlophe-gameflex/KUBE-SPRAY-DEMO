@@ -1,0 +1,7 @@
+*.log
+.venv/
+__pycache__/
+*.pyc
+simple-kind-config.yaml
+.ansible/
+.kubectl_aliases

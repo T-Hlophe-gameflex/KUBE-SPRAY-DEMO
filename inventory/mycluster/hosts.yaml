@@ -1,0 +1,82 @@
+# Kubespray Demo Inventory - High Availability Configuration
+# This inventory demonstrates a production-ready HA setup with:
+# - 3 Control Plane nodes (ensures quorum: 2/3 majority)
+# - 3 Worker nodes (provides fault tolerance and load distribution)
+# - Co-located etcd on control plane nodes (stacked topology)
+
+all:
+  hosts:
+    # Control Plane Nodes (Masters) - 3 nodes for HA quorum
+    k8s-master-01:
+      ansible_host: 192.168.1.10
+      ip: 192.168.1.10
+      etcd_member_name: etcd1
+      ansible_user: ubuntu
+    
+    k8s-master-02:
+      ansible_host: 192.168.1.11
+      ip: 192.168.1.11
+      etcd_member_name: etcd2
+      ansible_user: ubuntu
+    
+    k8s-master-03:
+      ansible_host: 192.168.1.12
+      ip: 192.168.1.12
+      etcd_member_name: etcd3
+      ansible_user: ubuntu
+    
+    # Worker Nodes - 3 nodes for workload distribution
+    k8s-worker-01:
+      ansible_host: 192.168.1.20
+      ip: 192.168.1.20
+      ansible_user: ubuntu
+    
+    k8s-worker-02:
+      ansible_host: 192.168.1.21
+      ip: 192.168.1.21
+      ansible_user: ubuntu
+    
+    k8s-worker-03:
+      ansible_host: 192.168.1.22
+      ip: 192.168.1.22
+      ansible_user: ubuntu
+
+  children:
+    # Kubernetes Control Plane Group
+    kube_control_plane:
+      hosts:
+        k8s-master-01:
+        k8s-master-02:
+        k8s-master-03:
+    
+    # etcd Cluster Group (co-located with control plane)
+    etcd:
+      hosts:
+        k8s-master-01:
+        k8s-master-02:
+        k8s-master-03:
+    
+    # Kubernetes Worker Nodes Group
+    kube_node:
+      hosts:
+        k8s-master-01:  # Masters can also run workloads
+        k8s-master-02:
+        k8s-master-03:
+        k8s-worker-01:
+        k8s-worker-02:
+        k8s-worker-03:
+    
+    # Calico Route Reflector Group (optional, for large clusters)
+    calico_rr:
+      hosts: {}
+    
+    # Kubernetes Group (all nodes)
+    k8s_cluster:
+      children:
+        kube_control_plane:
+        kube_node:
+        calico_rr:
+      vars:
+        # Global cluster variables
+        ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
+        ansible_ssh_private_key_file: "~/.ssh/id_rsa"

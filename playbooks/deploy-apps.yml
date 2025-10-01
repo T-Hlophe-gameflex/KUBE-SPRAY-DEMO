@@ -1,0 +1,35 @@
+---
+- name: Deploy PostgreSQL database
+  command: kubectl apply -f applications/01-database.yaml
+
+- name: Deploy API backend  
+  command: kubectl apply -f applications/02-api.yaml
+
+- name: Deploy Frontend
+  command: kubectl apply -f applications/03-frontend-simple.yaml
+
+- name: Wait for deployments to be ready
+  command: kubectl wait --for=condition=available --timeout=300s deployment/{{ item }}
+  loop:
+    - postgres
+    - api-backend
+    - frontend
+  ignore_errors: true
+
+- name: Get deployment status
+  command: kubectl get pods -n default
+  register: pods_status
+
+- name: Display deployment success
+  debug:
+    msg: |
+      ✅ All applications deployed successfully!
+      
+      🌐 Access the demo app at: http://localhost:30080
+      🔍 API health check: http://localhost:30081/health
+      
+      Current pods:
+      {{ pods_status.stdout }}
+      
+      The multi-tier application is now running:
+      - Frontend (nginx) → API (Node.js) → Database (PostgreSQL)

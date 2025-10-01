@@ -1,0 +1,21 @@
+---
+- name: Remove all applications
+  command: kubectl delete -f {{ item }}
+  with_items:
+    - applications/01-database.yaml
+    - applications/02-api.yaml
+    - applications/03-frontend-simple.yaml
+  ignore_errors: true
+
+- name: Verify removal
+  command: kubectl get pods -n default
+  register: remaining_pods
+  ignore_errors: true
+
+- name: Display removal status
+  debug:
+    msg: |
+      🗑️ Application removal completed!
+      
+      Remaining pods:
+      {{ remaining_pods.stdout if remaining_pods.rc == 0 else 'None' }}
