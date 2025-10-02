@@ -8,12 +8,30 @@
 - name: Deploy Frontend
   command: kubectl apply -f applications/03-frontend-simple.yaml
 
-- name: Wait for deployments to be ready
+- name: Deploy ELK Stack for logging
+  command: kubectl apply -f applications/04-elk-stack.yaml
+
+- name: Deploy Log Collection (Filebeat)
+  command: kubectl apply -f applications/05-log-collection.yaml
+
+- name: Wait for application deployments to be ready
   command: kubectl wait --for=condition=available --timeout=300s deployment/{{ item }}
   loop:
     - postgres
     - api-backend
     - frontend
+  ignore_errors: true
+
+- name: Wait for ELK stack deployments to be ready
+  command: kubectl wait --for=condition=available --timeout=600s deployment/{{ item }}
+  loop:
+    - elasticsearch
+    - logstash
+    - kibana
+  ignore_errors: true
+
+- name: Wait for Filebeat DaemonSet to be ready
+  command: kubectl rollout status daemonset/filebeat --timeout=300s
   ignore_errors: true
 
 - name: Get deployment status
@@ -23,13 +41,22 @@
 - name: Display deployment success
   debug:
     msg: |
-      ✅ All applications deployed successfully!
+      All applications and ELK stack deployed successfully.
       
-      🌐 Access the demo app at: http://localhost:30080
-      🔍 API health check: http://localhost:30081/health
+      Access points:
+      - Demo application: http://localhost:30080
+      - API health check: http://localhost:30081/health
+      - Kibana dashboard: http://localhost:30601
       
-      Current pods:
+      Current pod status:
       {{ pods_status.stdout }}
       
-      The multi-tier application is now running:
-      - Frontend (nginx) → API (Node.js) → Database (PostgreSQL)
+      Deployment architecture:
+      - Application tier: Frontend (nginx) -> API (Node.js) -> Database (PostgreSQL)
+      - Logging tier: Filebeat -> Logstash -> Elasticsearch <- Kibana
+      
+      Kibana setup instructions:
+      1. Navigate to http://localhost:30601
+      2. Create index pattern: kubespray-logs-*
+      3. Set time field: @timestamp
+      4. Explore logs in Discover section

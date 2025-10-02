@@ -1,7 +1,44 @@
+# Logs
 *.log
+/tmp/*.log
+kibana-pf.log
+
+# Python
 .venv/
 __pycache__/
 *.pyc
-simple-kind-config.yaml
+*.pyo
+*.pyd
+
+# Ansible
 .ansible/
+*.retry
+
+# Kubectl
 .kubectl_aliases
+
+# Kind
+simple-kind-config.yaml
+
+# Temporary files
+*.tmp
+*.swp
+*~
+
+# Backup files
+*.bak
+*.old
+README.old.md
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Kubernetes
+kubeconfig
+*.kubeconfig

@@ -1,0 +1,136 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: filebeat-config
+  namespace: system
+data:
+  filebeat.yml: |
+    # Kubernetes container logs with enhanced metadata
+    filebeat.inputs:
+    - type: container
+      enabled: true
+      paths:
+        - /var/log/containers/*.log
+      processors:
+        - add_kubernetes_metadata:
+            host: ${NODE_NAME}
+            matchers:
+            - logs_path:
+                logs_path: "/var/log/containers/"
+            default_indexers.enabled: false
+            default_matchers.enabled: false
+            indexers:
+              - container:
+            matchers:
+              - logs_path:
+                  logs_path: "/var/log/containers/"
+        - decode_json_fields:
+            fields: ["message"]
+            target: "json"
+            overwrite_keys: true
+            add_error_key: true
+            when:
+              regexp:
+                message: '^\{'
+        - add_fields:
+            target: "labels"
+            fields:
+              log_source: "kubernetes-containers"
+              cluster_name: "kubespray-cluster"
+        - script:
+            lang: javascript
+            source: >
+              function process(event) {
+                var k8s = event.Get("kubernetes");
+                if (k8s) {
+                  if (k8s.namespace) {
+                    event.Put("namespace", k8s.namespace);
+                  }
+                  if (k8s.pod && k8s.pod.name) {
+                    event.Put("pod_name", k8s.pod.name);
+                  }
+                  if (k8s.container && k8s.container.name) {
+                    event.Put("container_name", k8s.container.name);
+                  }
+                  if (k8s.node && k8s.node.name) {
+                    event.Put("node_name", k8s.node.name);
+                  }
+                  if (k8s.labels) {
+                    event.Put("k8s_labels", k8s.labels);
+                  }
+                }
+              }
+      fields:
+        collection_type: "container_logs"
+      fields_under_root: true
+      symlinks: true
+      scan_frequency: 10s
+      close_inactive: 2m
+      
+    # Kubernetes pod logs with namespace filtering
+    - type: log
+      enabled: true
+      paths:
+        - /var/log/pods/*/*/*.log
+      processors:
+        - add_kubernetes_metadata:
+            host: ${NODE_NAME}
+            in_cluster: true
+            default_indexers.enabled: true
+            default_matchers.enabled: true
+        - decode_json_fields:
+            fields: ["message"]
+            target: "json"
+            overwrite_keys: true
+            add_error_key: true
+            when:
+              regexp:
+                message: '^\{'
+        - add_fields:
+            target: "labels"
+            fields:
+              log_source: "kubernetes-pods"
+              cluster_name: "kubespray-cluster"
+        - script:
+            lang: javascript
+            source: >
+              function process(event) {
+                var filepath = event.Get("log.file.path");
+                if (filepath) {
+                  var parts = filepath.split("/");
+                  if (parts.length >= 5) {
+                    var podInfo = parts[4];
+                    if (podInfo.includes("_")) {
+                      var podParts = podInfo.split("_");
+                      if (podParts.length >= 2) {
+                        event.Put("namespace", podParts[1]);
+                        event.Put("pod_name", podParts[0]);
+                      }
+                    }
+                  }
+                  if (parts.length >= 6) {
+                    event.Put("container_name", parts[5]);
+                  }
+                }
+              }
+      fields:
+        collection_type: "pod_logs"
+      fields_under_root: true
+      scan_frequency: 10s
+      close_inactive: 2m
+
+    # Output to Logstash with namespace-aware routing
+    output.logstash:
+      hosts: ["logstash.monitoring.svc.cluster.local:5044"]
+      index: "kubernetes-logs-%{+yyyy.MM.dd}"
+      template.name: "kubernetes-logs"
+      template.pattern: "kubernetes-logs-*"
+      
+    # Enhanced logging configuration
+    logging.level: info
+    logging.to_files: true
+    logging.files:
+      path: /var/log/filebeat
+      name: filebeat
+      keepfiles: 3
+      permissions: 0644

@@ -1,11 +1,17 @@
 ---
-- name: Remove all applications
+- name: Remove all applications and ELK stack
   command: kubectl delete -f {{ item }}
   with_items:
-    - applications/01-database.yaml
-    - applications/02-api.yaml
+    - applications/05-log-collection.yaml
+    - applications/04-elk-stack.yaml
     - applications/03-frontend-simple.yaml
+    - applications/02-api.yaml
+    - applications/01-database.yaml
   ignore_errors: true
+
+- name: Wait for complete removal
+  pause:
+    seconds: 30
 
 - name: Verify removal
   command: kubectl get pods -n default
@@ -15,7 +21,12 @@
 - name: Display removal status
   debug:
     msg: |
-      🗑️ Application removal completed!
+      Application and ELK stack removal completed.
       
-      Remaining pods:
+      Remaining pods in default namespace:
       {{ remaining_pods.stdout if remaining_pods.rc == 0 else 'None' }}
+      
+      Removed components:
+      - Application tier: Frontend, API, Database
+      - Logging tier: Elasticsearch, Logstash, Kibana, Filebeat
+      - Storage: All PersistentVolumeClaims and ConfigMaps
