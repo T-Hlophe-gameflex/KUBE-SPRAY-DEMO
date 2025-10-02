@@ -23,21 +23,22 @@ spec:
           name: beats
         - containerPort: 9600
           name: http
-        env:
-        - name: "LS_JAVA_OPTS"
-          value: "-Xms512m -Xmx512m"
         resources:
           requests:
+            memory: 512Mi
+            cpu: 250m
+          limits:
             memory: 1Gi
             cpu: 500m
-          limits:
-            memory: 2Gi
-            cpu: 1000m
         volumeMounts:
-        - name: logstash-config
-          mountPath: /usr/share/logstash/pipeline/
+        - name: config
+          mountPath: /usr/share/logstash/pipeline/logstash.conf
+          subPath: logstash.conf
+        env:
+        - name: LS_JAVA_OPTS
+          value: "-Xms512m -Xmx768m"
       volumes:
-      - name: logstash-config
+      - name: config
         configMap:
           name: logstash-config
 

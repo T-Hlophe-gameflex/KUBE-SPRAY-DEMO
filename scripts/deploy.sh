@@ -48,11 +48,36 @@ deploy_logging() {
     wait_for_deployment "database" "postgres"
     echo "[OK] Data layer deployed"
     
-    kubectl apply -f k8s-manifests/observability/
+    echo "Deploying observability stack..."
+    
+    # Deploy Elasticsearch
+    kubectl apply -f k8s-manifests/observability/elasticsearch/
     wait_for_deployment "monitoring" "elasticsearch"
+    echo "[OK] Elasticsearch deployed"
+    
+    echo "Initializing Elasticsearch (0 replicas, removing sample data)..."
+    kubectl wait --for=condition=complete --timeout=120s job/elasticsearch-init -n monitoring 2>/dev/null || echo "Init job already completed or failed"
+    echo "[OK] Elasticsearch initialized"
+    
+    # Deploy Logstash with config from file
+    echo "Deploying Logstash configuration..."
+    kubectl create configmap logstash-config \
+      --from-file=logstash.conf=k8s-manifests/observability/logstash/pipeline.conf \
+      -n monitoring --dry-run=client -o yaml | kubectl apply -f - > /dev/null 2>&1
+    kubectl apply -f k8s-manifests/observability/logstash/
     wait_for_deployment "monitoring" "logstash"
+    echo "[OK] Logstash deployed"
+    
+    # Deploy Kibana
+    kubectl apply -f k8s-manifests/observability/kibana/
     wait_for_deployment "monitoring" "kibana"
-    echo "[OK] Observability deployed"
+    echo "[OK] Kibana deployed"
+    
+    # Deploy Filebeat
+    kubectl apply -f k8s-manifests/observability/filebeat/
+    echo "[OK] Filebeat deployed"
+    
+    echo "[OK] Observability stack deployed"
     
     kubectl apply -f k8s-manifests/infrastructure/
     echo "[OK] Infrastructure deployed"
@@ -70,6 +95,12 @@ show_access() {
     echo "Kibana Dashboard:"
     echo "  kubectl port-forward svc/kibana 5601:5601 -n monitoring &"
     echo "  http://localhost:5601"
+    echo ""
+    echo "Index Patterns to Create in Kibana:"
+    echo "  - kubespray-logs-* (consolidated view of all logs)"
+    echo "  - kubernetes-logs-* (all namespace-specific logs)"
+    echo "  - kubernetes-logs-monitoring-* (monitoring namespace only)"
+    echo "  - kubernetes-logs-backend-* (backend namespace only)"
     echo ""
     echo "Order Service:"
     echo "  kubectl port-forward svc/order-service 8080:8080 -n backend &"

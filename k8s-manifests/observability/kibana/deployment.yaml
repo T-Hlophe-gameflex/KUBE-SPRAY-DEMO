@@ -20,27 +20,25 @@ spec:
         image: docker.elastic.co/kibana/kibana:8.10.4
         ports:
         - containerPort: 5601
-          name: http
+          name: ui
         env:
         - name: ELASTICSEARCH_HOSTS
           value: "http://elasticsearch:9200"
-        - name: SERVER_NAME
-          value: "kibana"
         - name: SERVER_HOST
           value: "0.0.0.0"
-        volumeMounts:
-        - name: kibana-config
-          mountPath: /usr/share/kibana/config/kibana.yml
-          subPath: kibana.yml
         resources:
           requests:
+            memory: 512Mi
+            cpu: 250m
+          limits:
             memory: 1Gi
             cpu: 500m
-          limits:
-            memory: 2Gi
-            cpu: 1000m
+        volumeMounts:
+        - name: config
+          mountPath: /usr/share/kibana/config/kibana.yml
+          subPath: kibana.yml
       volumes:
-      - name: kibana-config
+      - name: config
         configMap:
           name: kibana-config
 
@@ -57,6 +55,6 @@ spec:
   ports:
   - port: 5601
     targetPort: 5601
-    name: http
+    name: ui
   selector:
     app: kibana

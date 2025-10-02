@@ -6,7 +6,7 @@
 ENTRIES=${1:-20}
 SERVICES=("user-service" "order-service" "payment-service" "notification-service")
 LEVELS=("INFO" "WARN" "ERROR" "DEBUG")
-NAMESPACES=("business-services" "prod" "staging" "dev")
+NAMESPACES=("backend" "monitoring" "database" "system")
 
 echo "Generating $ENTRIES sample log entries..."
 
@@ -35,8 +35,9 @@ for i in $(seq 1 $ENTRIES); do
     
     MESSAGE=${MESSAGES[$((RANDOM % ${#MESSAGES[@]}))]}
     
-    kubectl exec -n observability deployment/logstash -- curl -X POST \
-        "http://elasticsearch.observability.svc.cluster.local:9200/kubespray-logs-$(date +%Y.%m.%d)/_doc" \
+    # Write to both indices: kubespray-logs (consolidated) and kubernetes-logs (namespace-specific)
+    kubectl exec -n monitoring deployment/logstash -- curl -X POST \
+        "http://elasticsearch.monitoring.svc.cluster.local:9200/kubespray-logs-$(date +%Y.%m.%d)/_doc" \
         -H 'Content-Type: application/json' \
         -d "{
             \"@timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)\",
@@ -53,7 +54,7 @@ for i in $(seq 1 $ENTRIES); do
             \"environment\": \"$NAMESPACE\"
         }" -s -o /dev/null
     
-    if [ $((i % 5)) -eq 0 ]; then
+    if [ $((i % 10)) -eq 0 ]; then
         echo "Generated $i/$ENTRIES entries..."
     fi
     
@@ -61,6 +62,12 @@ for i in $(seq 1 $ENTRIES); do
     sleep 0.1
 done
 
-echo "✅ Generated $ENTRIES sample log entries!"
-echo "🔗 View in Kibana: http://localhost:5602"
-echo "📊 Go to Discover → Select 'kubespray-logs-*' index pattern"
+echo ""
+echo "Generated $ENTRIES sample log entries!"
+echo ""
+echo "View in Kibana: http://localhost:5601"
+echo "Index patterns available:"
+echo "  - kubespray-logs-* (consolidated view of all logs)"
+echo "  - kubernetes-logs-* (namespace-specific logs)"
+echo ""
+echo "Access Kibana: make logs"
