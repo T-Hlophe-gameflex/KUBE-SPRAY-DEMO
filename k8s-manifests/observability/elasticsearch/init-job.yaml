@@ -52,7 +52,25 @@ spec:
                 "settings": {
                   "number_of_shards": 1,
                   "number_of_replicas": 0,
-                  "refresh_interval": "5s"
+                  "refresh_interval": "5s",
+                  "mapping.total_fields.limit": 500,
+                  "mapping.depth.limit": 10,
+                  "mapping.nested_fields.limit": 20
+                },
+                "mappings": {
+                  "dynamic": "true",
+                  "dynamic_templates": [
+                    {
+                      "strings_as_keywords": {
+                        "match_mapping_type": "string",
+                        "match": "*_id",
+                        "mapping": {
+                          "type": "keyword",
+                          "ignore_above": 256
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }'
@@ -68,7 +86,25 @@ spec:
                 "settings": {
                   "number_of_shards": 1,
                   "number_of_replicas": 0,
-                  "refresh_interval": "5s"
+                  "refresh_interval": "5s",
+                  "mapping.total_fields.limit": 500,
+                  "mapping.depth.limit": 10,
+                  "mapping.nested_fields.limit": 20
+                },
+                "mappings": {
+                  "dynamic": "true",
+                  "dynamic_templates": [
+                    {
+                      "strings_as_keywords": {
+                        "match_mapping_type": "string",
+                        "match": "*_id",
+                        "mapping": {
+                          "type": "keyword",
+                          "ignore_above": 256
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }'

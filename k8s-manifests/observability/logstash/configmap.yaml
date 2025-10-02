@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: logstash-config
+  namespace: monitoring
+  labels:
+    app: logstash
+# Note: This ConfigMap should be created from the pipeline.conf file using:
+# kubectl create configmap logstash-config --from-file=logstash.conf=k8s-manifests/observability/logstash/pipeline.conf -n monitoring --dry-run=client -o yaml | kubectl apply -f -
+#
+# Or use the helper script: ./scripts/apply-logstash-config.sh
