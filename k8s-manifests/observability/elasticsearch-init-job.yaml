@@ -1,0 +1,92 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: elasticsearch-init
+  namespace: monitoring
+  labels:
+    app: elasticsearch-init
+spec:
+  ttlSecondsAfterFinished: 300
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: elasticsearch-init
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: init
+        image: curlimages/curl:8.4.0
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+          echo "Waiting for Elasticsearch to be ready..."
+          until curl -s -f http://elasticsearch:9200/_cluster/health > /dev/null; do
+            echo "Waiting for Elasticsearch..."
+            sleep 5
+          done
+          echo "Elasticsearch is ready!"
+          
+          echo "Setting default number_of_replicas to 0..."
+          curl -X PUT "http://elasticsearch:9200/_cluster/settings" \
+            -H 'Content-Type: application/json' \
+            -d '{
+              "persistent": {
+                "cluster.routing.allocation.disk.threshold_enabled": "true",
+                "cluster.routing.allocation.disk.watermark.low": "85%",
+                "cluster.routing.allocation.disk.watermark.high": "90%",
+                "cluster.routing.allocation.disk.watermark.flood_stage": "95%"
+              }
+            }'
+          
+          echo ""
+          echo "Creating index template with 0 replicas for kubernetes-logs..."
+          curl -X PUT "http://elasticsearch:9200/_index_template/kubernetes-logs-template" \
+            -H 'Content-Type: application/json' \
+            -d '{
+              "index_patterns": ["kubernetes-logs-*"],
+              "priority": 500,
+              "template": {
+                "settings": {
+                  "number_of_shards": 1,
+                  "number_of_replicas": 0,
+                  "refresh_interval": "5s"
+                }
+              }
+            }'
+          
+          echo ""
+          echo "Creating index template with 0 replicas for kubespray-logs (consolidated)..."
+          curl -X PUT "http://elasticsearch:9200/_index_template/kubespray-logs-template" \
+            -H 'Content-Type: application/json' \
+            -d '{
+              "index_patterns": ["kubespray-logs-*"],
+              "priority": 500,
+              "template": {
+                "settings": {
+                  "number_of_shards": 1,
+                  "number_of_replicas": 0,
+                  "refresh_interval": "5s"
+                }
+              }
+            }'
+          
+          echo ""
+          echo "Setting existing indices to 0 replicas..."
+          curl -X PUT "http://elasticsearch:9200/*/_settings" \
+            -H 'Content-Type: application/json' \
+            -d '{
+              "index": {
+                "number_of_replicas": 0
+              }
+            }'
+          
+          echo ""
+          echo "Deleting Kibana sample data indices..."
+          curl -X DELETE "http://elasticsearch:9200/kibana_sample_*" || echo "No sample data found"
+          
+          echo ""
+          echo "Elasticsearch initialization complete!"
+          curl -s "http://elasticsearch:9200/_cat/indices?v"
