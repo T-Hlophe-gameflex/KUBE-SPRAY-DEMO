@@ -45,28 +45,22 @@ deploy_logging() {
     echo "[OK] Namespaces created"
     
     kubectl apply -f k8s-manifests/data-layer/
-    wait_for_deployment "data-layer" "postgres"
+    wait_for_deployment "database" "postgres"
     echo "[OK] Data layer deployed"
     
     kubectl apply -f k8s-manifests/observability/
-    wait_for_deployment "observability" "elasticsearch"
-    wait_for_deployment "observability" "logstash"
-    wait_for_deployment "observability" "kibana"
+    wait_for_deployment "monitoring" "elasticsearch"
+    wait_for_deployment "monitoring" "logstash"
+    wait_for_deployment "monitoring" "kibana"
     echo "[OK] Observability deployed"
     
     kubectl apply -f k8s-manifests/infrastructure/
     echo "[OK] Infrastructure deployed"
     
     kubectl apply -f k8s-manifests/business-services/
-    wait_for_deployment "business-services" "order-service"
-    wait_for_deployment "business-services" "user-service"
+    wait_for_deployment "backend" "order-service"
+    wait_for_deployment "backend" "user-service"
     echo "[OK] Business services deployed"
-    
-    kubectl apply -f k8s-manifests/environments/
-    wait_for_deployment "prod" "order-service-prod"
-    wait_for_deployment "staging" "order-service-staging"
-    wait_for_deployment "dev" "order-service-dev"
-    echo "[OK] Environments deployed"
 }
 
 show_access() {
@@ -74,25 +68,25 @@ show_access() {
     echo "Access Services"
     echo "=================="
     echo "Kibana Dashboard:"
-    echo "  kubectl port-forward svc/kibana 5601:5601 -n observability &"
+    echo "  kubectl port-forward svc/kibana 5601:5601 -n monitoring &"
     echo "  http://localhost:5601"
     echo ""
     echo "Order Service:"
-    echo "  kubectl port-forward svc/order-service 8080:8080 -n business-services &"
+    echo "  kubectl port-forward svc/order-service 8080:8080 -n backend &"
     echo "  curl -X POST http://localhost:8080/orders -H 'Content-Type: application/json' -d '{\"item\":\"test\"}'"
     echo ""
     echo "User Service:"
-    echo "  kubectl port-forward svc/user-service 8081:8081 -n business-services &"
+    echo "  kubectl port-forward svc/user-service 8081:8081 -n backend &"
     echo "  curl http://localhost:8081/health"
     echo ""
-    echo "Production Service:"
-    echo "  kubectl port-forward svc/order-service 8082:8080 -n prod &"
-    echo "  curl http://localhost:8082/health"
+    echo "PostgreSQL Database:"
+    echo "  kubectl port-forward svc/postgresql 5432:5432 -n database &"
+    echo "  psql -h localhost -p 5432 -U postgres"
 }
 
 start_kibana() {
     echo "Starting Kibana access..."
-    kubectl port-forward svc/kibana 5601:5601 -n observability > /dev/null 2>&1 &
+    kubectl port-forward svc/kibana 5601:5601 -n monitoring > /dev/null 2>&1 &
     KIBANA_PID=$!
     echo "[OK] Kibana available at: http://localhost:5601"
     echo "Kibana PID: $KIBANA_PID (use 'kill $KIBANA_PID' to stop)"
