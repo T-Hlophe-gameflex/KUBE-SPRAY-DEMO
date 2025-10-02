@@ -1,0 +1,404 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service
+  namespace: backend
+  labels:
+    app: order-service
+    component: business-logic
+    service-type: order-management
+    version: v1.0.0
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: order-service
+  template:
+    metadata:
+      labels:
+        app: order-service
+        component: business-logic
+        service-type: order-management
+        version: v1.0.0
+    spec:
+      containers:
+      - name: order-service
+        image: node:18-alpine
+        ports:
+        - containerPort: 8080
+          name: http
+        - containerPort: 9090
+          name: metrics
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: LOG_LEVEL
+          value: "info"
+        - name: SERVICE_NAME
+          value: "order-service"
+        - name: SERVICE_VERSION
+          value: "v1.0.0"
+        - name: NAMESPACE
+          value: "business-services"
+        - name: SERVICE_GROUP
+          value: "application-services"
+        - name: POSTGRES_HOST
+          value: "postgres.database.svc.cluster.local"
+        - name: POSTGRES_DB
+          value: "orderdb"
+        - name: POSTGRES_USER
+          value: "orderuser"
+        - name: POSTGRES_PASSWORD
+          value: "orderpass123"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 10
+        command: ["/bin/sh"]
+        args:
+          - -c
+          - |
+            mkdir -p /app
+            cat > /app/package.json << 'EOF'
+            {
+              "name": "order-service",
+              "version": "1.0.0",
+              "description": "Order Management Business Service",
+              "main": "server.js",
+              "dependencies": {
+                "express": "^4.18.2",
+                "pg": "^8.8.0",
+                "winston": "^3.8.2",
+                "uuid": "^9.0.0",
+                "prom-client": "^14.2.0"
+              }
+            }
+            EOF
+            
+            cat > /app/server.js << 'EOF'
+            const express = require('express');
+            const winston = require('winston');
+            const { v4: uuidv4 } = require('uuid');
+            const { Pool } = require('pg');
+            const client = require('prom-client');
+            
+            // Business service structured logging
+            const logger = winston.createLogger({
+              level: process.env.LOG_LEVEL || 'info',
+              format: winston.format.combine(
+                winston.format.timestamp(),
+                winston.format.errors({ stack: true }),
+                winston.format.json()
+              ),
+              defaultMeta: {
+                service: process.env.SERVICE_NAME || 'order-service',
+                version: process.env.SERVICE_VERSION || 'v1.0.0',
+                namespace: process.env.NAMESPACE || 'business-services',
+                service_group: process.env.SERVICE_GROUP || 'application-services',
+                component: 'business-logic',
+                service_type: 'order-management',
+                environment: process.env.NODE_ENV || 'production',
+                hostname: require('os').hostname(),
+                pid: process.pid
+              },
+              transports: [new winston.transports.Console()]
+            });
+            
+            // Business metrics
+            const register = new client.Registry();
+            client.collectDefaultMetrics({ register });
+            
+            const businessMetrics = {
+              ordersCreated: new client.Counter({
+                name: 'business_orders_created_total',
+                help: 'Total orders created',
+                labelNames: ['status', 'product_category'],
+                registers: [register]
+              }),
+              orderValue: new client.Histogram({
+                name: 'business_order_value_dollars',
+                help: 'Order value in dollars',
+                buckets: [10, 50, 100, 500, 1000, 5000],
+                registers: [register]
+              }),
+              processingTime: new client.Histogram({
+                name: 'business_order_processing_seconds',
+                help: 'Order processing time',
+                buckets: [0.1, 0.5, 1, 2, 5],
+                registers: [register]
+              })
+            };
+            
+            // Database connection
+            const pool = new Pool({
+              host: process.env.POSTGRES_HOST,
+              database: process.env.POSTGRES_DB,
+              user: process.env.POSTGRES_USER,
+              password: process.env.POSTGRES_PASSWORD,
+              port: 5432,
+              max: 20,
+              idleTimeoutMillis: 30000,
+            });
+            
+            const app = express();
+            app.use(express.json());
+            
+            // Business request logging
+            app.use((req, res, next) => {
+              const requestId = uuidv4();
+              const startTime = Date.now();
+              req.requestId = requestId;
+              req.startTime = startTime;
+              
+              logger.info('Business request initiated', {
+                requestId,
+                method: req.method,
+                endpoint: req.path,
+                userAgent: req.get('User-Agent'),
+                clientIp: req.ip,
+                operation: 'request_start'
+              });
+              
+              const originalSend = res.send;
+              res.send = function(data) {
+                const duration = (Date.now() - startTime) / 1000;
+                
+                const logLevel = res.statusCode >= 500 ? 'error' : 
+                               res.statusCode >= 400 ? 'warn' : 'info';
+                
+                logger.log(logLevel, 'Business request completed', {
+                  requestId,
+                  method: req.method,
+                  endpoint: req.path,
+                  statusCode: res.statusCode,
+                  duration,
+                  responseSize: data ? Buffer.byteLength(data) : 0,
+                  operation: 'request_complete'
+                });
+                
+                originalSend.call(this, data);
+              };
+              
+              next();
+            });
+            
+            // Health endpoints
+            app.get('/health', (req, res) => {
+              res.json({ 
+                service: 'order-service',
+                status: 'healthy',
+                version: process.env.SERVICE_VERSION,
+                namespace: process.env.NAMESPACE,
+                service_group: process.env.SERVICE_GROUP,
+                uptime: process.uptime(),
+                timestamp: new Date().toISOString()
+              });
+            });
+            
+            app.get('/ready', async (req, res) => {
+              try {
+                await pool.query('SELECT 1');
+                res.json({ 
+                  service: 'order-service',
+                  status: 'ready',
+                  database: 'connected',
+                  timestamp: new Date().toISOString()
+                });
+              } catch (error) {
+                logger.error('Readiness check failed', {
+                  requestId: req.requestId,
+                  error: error.message,
+                  operation: 'readiness_check'
+                });
+                
+                res.status(503).json({ 
+                  service: 'order-service',
+                  status: 'not ready',
+                  database: 'disconnected',
+                  error: error.message
+                });
+              }
+            });
+            
+            app.get('/metrics', async (req, res) => {
+              res.set('Content-Type', register.contentType);
+              res.end(await register.metrics());
+            });
+            
+            // Business logic endpoints
+            app.post('/orders', async (req, res) => {
+              const orderId = uuidv4();
+              const { userId, productId, quantity, productCategory = 'electronics' } = req.body;
+              
+              logger.info('Order creation business logic started', {
+                requestId: req.requestId,
+                orderId,
+                userId,
+                productId,
+                quantity,
+                productCategory,
+                operation: 'create_order'
+              });
+              
+              try {
+                // Simulate business validation
+                if (!userId || !productId || !quantity) {
+                  logger.warn('Order validation failed', {
+                    requestId: req.requestId,
+                    orderId,
+                    reason: 'missing_required_fields',
+                    operation: 'validation'
+                  });
+                  
+                  return res.status(400).json({
+                    error: 'Missing required fields',
+                    orderId,
+                    required: ['userId', 'productId', 'quantity']
+                  });
+                }
+                
+                // Simulate product pricing
+                const basePrice = Math.random() * 500 + 50;
+                const totalValue = basePrice * quantity;
+                
+                // Business processing simulation
+                await new Promise(resolve => setTimeout(resolve, Math.random() * 500 + 100));
+                
+                const processingDuration = (Date.now() - req.startTime) / 1000;
+                
+                logger.info('Order business logic completed', {
+                  requestId: req.requestId,
+                  orderId,
+                  userId,
+                  productId,
+                  quantity,
+                  productCategory,
+                  totalValue,
+                  processingDuration,
+                  operation: 'order_processed'
+                });
+                
+                // Record business metrics
+                businessMetrics.ordersCreated.inc({ status: 'success', product_category: productCategory });
+                businessMetrics.orderValue.observe(totalValue);
+                businessMetrics.processingTime.observe(processingDuration);
+                
+                res.status(201).json({
+                  orderId,
+                  userId,
+                  productId,
+                  quantity,
+                  productCategory,
+                  totalValue: totalValue.toFixed(2),
+                  status: 'created',
+                  service: 'order-service',
+                  namespace: process.env.NAMESPACE,
+                  timestamp: new Date().toISOString()
+                });
+                
+              } catch (error) {
+                logger.error('Order creation business logic failed', {
+                  requestId: req.requestId,
+                  orderId,
+                  userId,
+                  productId,
+                  error: error.message,
+                  stack: error.stack,
+                  operation: 'order_error'
+                });
+                
+                businessMetrics.ordersCreated.inc({ status: 'error', product_category: productCategory });
+                
+                res.status(500).json({
+                  error: 'Business logic error',
+                  orderId,
+                  service: 'order-service',
+                  timestamp: new Date().toISOString()
+                });
+              }
+            });
+            
+            // Order status endpoint
+            app.get('/orders/:orderId', (req, res) => {
+              const { orderId } = req.params;
+              
+              logger.info('Order status inquiry', {
+                requestId: req.requestId,
+                orderId,
+                operation: 'order_status_check'
+              });
+              
+              // Simulate order status
+              const statuses = ['pending', 'processing', 'confirmed', 'shipped'];
+              const status = statuses[Math.floor(Math.random() * statuses.length)];
+              
+              res.json({
+                orderId,
+                status,
+                service: 'order-service',
+                namespace: process.env.NAMESPACE,
+                timestamp: new Date().toISOString()
+              });
+            });
+            
+            const PORT = process.env.PORT || 8080;
+            
+            app.listen(PORT, () => {
+              logger.info('Order service business logic initialized', {
+                port: PORT,
+                service: 'order-service',
+                version: process.env.SERVICE_VERSION,
+                namespace: process.env.NAMESPACE,
+                service_group: process.env.SERVICE_GROUP,
+                environment: process.env.NODE_ENV,
+                operation: 'service_start'
+              });
+            });
+            
+            // Graceful shutdown
+            process.on('SIGTERM', () => {
+              logger.info('Order service graceful shutdown initiated', {
+                operation: 'graceful_shutdown'
+              });
+              process.exit(0);
+            });
+            EOF
+            
+            cd /app && npm install && node server.js
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-service
+  namespace: backend
+  labels:
+    app: order-service
+    component: business-logic
+    service-type: order-management
+spec:
+  selector:
+    app: order-service
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
+  - name: metrics
+    port: 9090
+    targetPort: 9090
+  type: ClusterIP

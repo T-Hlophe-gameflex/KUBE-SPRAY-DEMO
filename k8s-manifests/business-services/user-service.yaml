@@ -1,0 +1,280 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: user-service
+  namespace: backend
+  labels:
+    app: user-service
+    component: business-logic
+    service-type: user-management
+    version: v1.0.0
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: user-service
+  template:
+    metadata:
+      labels:
+        app: user-service
+        component: business-logic
+        service-type: user-management
+        version: v1.0.0
+    spec:
+      containers:
+      - name: user-service
+        image: node:18-alpine
+        ports:
+        - containerPort: 8081
+          name: http
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: LOG_LEVEL
+          value: "info"
+        - name: SERVICE_NAME
+          value: "user-service"
+        - name: SERVICE_VERSION
+          value: "v1.0.0"
+        - name: NAMESPACE
+          value: "business-services"
+        - name: ORDER_SERVICE_URL
+          value: "http://order-service.business-services.svc.cluster.local:8080"
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8081
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        command: ["/bin/sh"]
+        args:
+          - -c
+          - |
+            mkdir -p /app
+            cat > /app/package.json << 'EOF'
+            {
+              "name": "user-service",
+              "version": "1.0.0",
+              "description": "User Management Business Service",
+              "main": "server.js",
+              "dependencies": {
+                "express": "^4.18.2",
+                "winston": "^3.8.2",
+                "uuid": "^9.0.0",
+                "axios": "^1.3.0"
+              }
+            }
+            EOF
+            
+            cat > /app/server.js << 'EOF'
+            const express = require('express');
+            const winston = require('winston');
+            const { v4: uuidv4 } = require('uuid');
+            const axios = require('axios');
+            
+            const logger = winston.createLogger({
+              level: process.env.LOG_LEVEL || 'info',
+              format: winston.format.combine(
+                winston.format.timestamp(),
+                winston.format.errors({ stack: true }),
+                winston.format.json()
+              ),
+              defaultMeta: {
+                service: process.env.SERVICE_NAME || 'user-service',
+                version: process.env.SERVICE_VERSION || 'v1.0.0',
+                namespace: process.env.NAMESPACE || 'business-services',
+                service_group: 'application-services',
+                component: 'business-logic',
+                service_type: 'user-management',
+                environment: process.env.NODE_ENV || 'production',
+                hostname: require('os').hostname()
+              },
+              transports: [new winston.transports.Console()]
+            });
+            
+            const app = express();
+            app.use(express.json());
+            
+            // Mock user database
+            const users = new Map([
+              [1, { id: 1, username: 'john_doe', email: 'john@kubespray.com', role: 'customer', created_at: new Date('2023-01-15') }],
+              [2, { id: 2, username: 'jane_smith', email: 'jane@kubespray.com', role: 'premium_customer', created_at: new Date('2023-02-20') }],
+              [3, { id: 3, username: 'admin_user', email: 'admin@kubespray.com', role: 'admin', created_at: new Date('2023-01-01') }]
+            ]);
+            
+            app.use((req, res, next) => {
+              req.requestId = uuidv4();
+              logger.info('User service request', {
+                requestId: req.requestId,
+                method: req.method,
+                endpoint: req.path,
+                operation: 'user_request'
+              });
+              next();
+            });
+            
+            app.get('/health', (req, res) => {
+              res.json({
+                service: 'user-service',
+                status: 'healthy',
+                version: process.env.SERVICE_VERSION,
+                namespace: process.env.NAMESPACE
+              });
+            });
+            
+            app.get('/ready', (req, res) => {
+              res.json({
+                service: 'user-service',
+                status: 'ready',
+                timestamp: new Date().toISOString()
+              });
+            });
+            
+            app.get('/users/:userId', (req, res) => {
+              const userId = parseInt(req.params.userId);
+              const user = users.get(userId);
+              
+              if (!user) {
+                logger.warn('User not found', {
+                  requestId: req.requestId,
+                  userId,
+                  operation: 'user_lookup'
+                });
+                return res.status(404).json({ error: 'User not found' });
+              }
+              
+              logger.info('User retrieved', {
+                requestId: req.requestId,
+                userId,
+                username: user.username,
+                role: user.role,
+                operation: 'user_retrieved'
+              });
+              
+              res.json(user);
+            });
+            
+            // Inter-service communication: Create order for user
+            app.post('/users/:userId/orders', async (req, res) => {
+              try {
+                const userId = parseInt(req.params.userId);
+                const user = users.get(userId);
+                
+                if (!user) {
+                  logger.warn('User not found for order creation', {
+                    requestId: req.requestId,
+                    userId,
+                    operation: 'inter_service_order'
+                  });
+                  return res.status(404).json({ error: 'User not found' });
+                }
+                
+                logger.info('Inter-service order creation initiated', {
+                  requestId: req.requestId,
+                  userId,
+                  username: user.username,
+                  targetService: 'order-service',
+                  operation: 'inter_service_call'
+                });
+                
+                const orderData = {
+                  ...req.body,
+                  userId: userId
+                };
+                
+                const response = await axios.post(`${process.env.ORDER_SERVICE_URL}/orders`, orderData, {
+                  timeout: 10000,
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'X-Request-ID': req.requestId,
+                    'X-User-ID': userId.toString()
+                  }
+                });
+                
+                logger.info('Inter-service order creation completed', {
+                  requestId: req.requestId,
+                  userId,
+                  orderId: response.data.orderId,
+                  totalValue: response.data.totalValue,
+                  targetService: 'order-service',
+                  operation: 'inter_service_success'
+                });
+                
+                res.status(201).json({
+                  user: {
+                    id: user.id,
+                    username: user.username,
+                    email: user.email,
+                    role: user.role
+                  },
+                  order: response.data,
+                  service: 'user-service',
+                  namespace: process.env.NAMESPACE,
+                  timestamp: new Date().toISOString()
+                });
+                
+              } catch (error) {
+                logger.error('Inter-service order creation failed', {
+                  requestId: req.requestId,
+                  userId: req.params.userId,
+                  targetService: 'order-service',
+                  error: error.message,
+                  statusCode: error.response?.status,
+                  operation: 'inter_service_error'
+                });
+                
+                res.status(error.response?.status || 503).json({
+                  error: error.response?.data?.error || 'Service communication failed',
+                  service: 'user-service',
+                  timestamp: new Date().toISOString()
+                });
+              }
+            });
+            
+            const PORT = process.env.PORT || 8081;
+            
+            app.listen(PORT, () => {
+              logger.info('User service business logic initialized', {
+                port: PORT,
+                service: 'user-service',
+                version: process.env.SERVICE_VERSION,
+                namespace: process.env.NAMESPACE,
+                orderServiceUrl: process.env.ORDER_SERVICE_URL,
+                operation: 'service_start'
+              });
+            });
+            EOF
+            
+            cd /app && npm install && node server.js
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: user-service
+  namespace: backend
+  labels:
+    app: user-service
+    component: business-logic
+    service-type: user-management
+spec:
+  selector:
+    app: user-service
+  ports:
+  - name: http
+    port: 8081
+    targetPort: 8081
+  type: ClusterIP

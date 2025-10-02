@@ -1,4 +1,3 @@
-# Kubespray Demo Inventory - High Availability Configuration
 # This inventory demonstrates a production-ready HA setup with:
 # - 3 Control Plane nodes (ensures quorum: 2/3 majority)
 # - 3 Worker nodes (provides fault tolerance and load distribution)
